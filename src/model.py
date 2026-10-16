@@ -50,14 +50,14 @@ class AssociativeRecallTransformer(nn.Module):
         self.blocks = nn.ModuleList([GPT2Block(d_model,num_heads) for _ in range(num_layers)])
         self.token_projection = nn.Linear(vocab_size,d_model, bias = False)
         self.position_projection = nn.Linear(seq_len,d_model, bias = False)
-        self.lm_head = nn.linear(d_model,vocab_size)
+        self.lm_head = nn.Linear(d_model,vocab_size)
     def forward(self,x):
-        x = F.one_hot(x, num_classes=self.token_projection.in_features)
-        positions = torch.arange(0,x.shape(1))
-        positions = F.one_hot(positions, self.position_projection.in_features)
+        x = F.one_hot(x, num_classes=self.token_projection.in_features).float()
+        positions = torch.arange(0,x.size(1))
+        positions = F.one_hot(positions, self.position_projection.in_features).float()
         positions = self.position_projection(positions)
         x= self.token_projection(x)
         x+=positions
         for block in self.blocks:
-             x = self.block(x)
+             x = block(x)
         return self.lm_head(x)
