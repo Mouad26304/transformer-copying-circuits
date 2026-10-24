@@ -53,7 +53,7 @@ class AssociativeRecallTransformer(nn.Module):
         self.lm_head = nn.Linear(d_model,vocab_size)
     def forward(self,x):
         x = F.one_hot(x, num_classes=self.token_projection.in_features).float()
-        positions = torch.arange(0,x.size(1))
+        positions = torch.arange(0,x.size(1), device=x.device)
         positions = F.one_hot(positions, self.position_projection.in_features).float()
         positions = self.position_projection(positions)
         x= self.token_projection(x)
