@@ -9,7 +9,13 @@ from torch.utils.data import DataLoader
 
 from src.data import AssociativeRecallDataset
 from src.model import AssociativeRecallTransformer
+import os
 
+save_dir = "/content/drive/MyDrive/transformer-copying-circuits"
+os.makedirs(save_dir, exist_ok=True)
+
+best_test_acc = 0.0
+best_test_loss = float("inf")
 
 def set_seed(seed):
     random.seed(seed)
@@ -114,7 +120,21 @@ def main(args):
         test_loss, test_acc = run_epoch(
             model, test_loader, device
         )
+        if (
+            test_acc > best_test_acc
+            or (
+                test_acc == best_test_acc
+                and test_loss < best_test_loss
+            )
+        ):
+            best_test_acc = test_acc
+            best_test_loss = test_loss
 
+            path = f"{save_dir}/model_{args.num_layers}layers.pt"
+
+            torch.save(model.state_dict(), path)
+
+            print(f"Saved model to {path}")
         print(
             f"Epoch {epoch:03d} | "
             f"train loss {train_loss:.4f} | "
