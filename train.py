@@ -14,8 +14,7 @@ import os
 save_dir = "/content/drive/MyDrive/transformer-copying-circuits"
 os.makedirs(save_dir, exist_ok=True)
 
-best_test_acc = 0.0
-best_test_loss = float("inf")
+
 
 def set_seed(seed):
     random.seed(seed)
@@ -145,6 +144,8 @@ def main(args):
 
 
 if __name__ == "__main__":
+    best_test_acc = 0.0
+    best_test_loss = float("inf")
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--num-layers", type=int, default=2)
