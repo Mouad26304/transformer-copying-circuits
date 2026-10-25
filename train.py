@@ -62,6 +62,8 @@ def run_epoch(model, loader, device, optimizer=None):
 
 
 def main(args):
+    best_test_acc = 0.0
+    best_test_loss = float("inf")
     set_seed(args.seed)
 
     device = torch.device(
@@ -144,8 +146,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    best_test_acc = 0.0
-    best_test_loss = float("inf")
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--num-layers", type=int, default=2)
