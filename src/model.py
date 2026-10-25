@@ -19,7 +19,8 @@ class GPT2Block(nn.Module):
         self.W_k = nn.Linear(d_model,d_model)
         self.W_v = nn.Linear(d_model,d_model)
         self.W_o = nn.Linear(d_model,d_model)
-
+        self.capture_attention = False
+        self.last_attention = None
     def forward(self, x):
         b,s,d = x.size()
         residual = x
@@ -33,6 +34,8 @@ class GPT2Block(nn.Module):
         mask = torch.triu( torch.ones(scores.shape[-2:], device=scores.device, dtype=torch.bool), diagonal=1)
         scores = scores.masked_fill(mask, -math.inf)
         scores =torch.softmax(scores, dim = -1)
+        if self.capture_attention:
+            self.last_attention = scores.detach().cpu()
         scores = scores@V
         scores = scores.transpose(1,2)
         scores = scores.reshape(b,s,d)
