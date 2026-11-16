@@ -87,7 +87,7 @@ def main(args):
         n_keys=args.n_keys,
         n_values=args.n_values,
         n_pairs=args.n_pairs,
-        seed=args.seed + 1,
+        seed=args.seed + args.n_train,
     )
 
     train_loader = DataLoader(
