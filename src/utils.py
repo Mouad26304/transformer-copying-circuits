@@ -92,7 +92,7 @@ def extract_attention(model, tokens):
             block.capture_attention = False
             block.last_attention = None
 
-    return predictions.cpu(), attentions
+    return predictions.cpu(), attentions, logits.detach().cpu()
 
 
 def plot_attention(attentions, tokens, save_dir, n_keys):
@@ -154,3 +154,166 @@ def plot_attention(attentions, tokens, save_dir, n_keys):
 
         plt.show()
         plt.close(fig)
+
+def compute_behavior_metrics(logits, tokens, targets):
+    """Measure recall, in-context prediction, and logit margin."""
+
+    if logits.ndim == 3:
+        logits = logits[:, -1, :]
+
+    tokens = tokens.to(logits.device)
+    targets = targets.reshape(-1).to(logits.device)
+
+    # Values occupy positions 1, 3, 5, 7, ...
+    values = tokens[:, 1:-1:2].long()
+
+    if values.shape[1] < 2:
+        raise ValueError("Need at least two key-value pairs.")
+
+    if not torch.all((values == targets[:, None]).sum(-1) == 1):
+        raise ValueError("Each target must appear exactly once among input values.")
+
+    # 1. Exact recall accuracy
+    predicted = logits.argmax(dim=-1)
+    accuracy = (predicted == targets).float().mean()
+
+    # 2. Prediction belongs to the values in context
+    in_context = (predicted[:, None] == values).any(dim=-1)
+    in_context_rate = in_context.float().mean()
+
+    # 3. Margin against the strongest incorrect in-context value
+    candidate_logits = logits.gather(dim=1, index=values)
+
+    wrong_logits = candidate_logits.masked_fill(
+        values == targets[:, None],
+        float("-inf"),
+    ).max(dim=-1).values
+
+    correct_logits = logits.gather(
+        dim=1, index=targets[:, None]
+    ).squeeze(-1)
+
+    margin = correct_logits - wrong_logits
+
+    return {
+        "accuracy": accuracy.item(),
+        "in_context_rate": in_context_rate.item(),
+        "mean_value_margin": margin.mean().item(),
+    }
+
+
+def compute_attention_metrics(tokens, attentions):
+    """
+    Measure attention patterns for each layer and head.
+
+    attentions: list of tensors (B, H, T, T)
+    tokens: (B, T)
+    """
+
+    tokens = tokens.cpu()
+    n_pairs = (tokens.shape[1] - 1) // 2
+
+    if n_pairs < 2:
+        raise ValueError("Need at least two pairs.")
+
+    # Keys: positions 0, 2, 4, ...
+    keys = tokens[:, :-1:2]
+
+    # Query: final position
+    query = tokens[:, -1:]
+
+    # Find which key matches the query
+    matching = keys == query
+
+    if not torch.all(matching.sum(dim=-1) == 1):
+        raise ValueError("Expected exactly one matching key.")
+
+    correct_pair_index = matching.long().argmax(dim=-1)
+
+    results = []
+
+    for layer, attention in enumerate(attentions):
+        attention = attention.detach().cpu()
+
+        if (
+            attention.ndim != 4
+            or attention.shape[0] != tokens.shape[0]
+            or attention.shape[-2:]
+            != (tokens.shape[1], tokens.shape[1])
+        ):
+            raise ValueError(
+                f"Invalid attention shape in layer {layer}"
+            )
+
+        # -------------------------------------
+        # 1. Query -> correct value
+        # -------------------------------------
+
+        # (B, H, n_pairs)
+        value_attention = attention[:, :, -1, 1:-1:2]
+
+        batch_size, n_heads, _ = value_attention.shape
+
+        indices = correct_pair_index[:, None, None].expand(
+            -1, n_heads, 1
+        )
+
+        # (B, H)
+        correct_value = value_attention.gather(
+            dim=2, index=indices
+        ).squeeze(-1)
+
+        other_values = (
+            value_attention.sum(dim=-1) - correct_value
+        ) / (n_pairs - 1)
+
+        # Fraction of attention to values assigned to correct one
+        correct_value_share = correct_value / (
+            value_attention.sum(dim=-1).clamp_min(1e-12)
+        )
+
+        # -------------------------------------
+        # 2. Value -> preceding key
+        # -------------------------------------
+
+        previous_keys = []
+        other_keys = []
+
+        # Skip first pair: it has no competing preceding keys
+        for pair_idx in range(1, n_pairs):
+            value_pos = 2 * pair_idx + 1
+            correct_key_pos = 2 * pair_idx
+
+            previous_keys.append(
+                attention[:, :, value_pos, correct_key_pos]
+            )
+
+            other_key_positions = torch.arange(
+                0, correct_key_pos, 2
+            )
+
+            other_keys.append(
+                attention[
+                    :, :, value_pos, other_key_positions
+                ].mean(dim=-1)
+            )
+
+        # Average over examples and value positions
+        previous_key_mean = torch.stack(
+            previous_keys, dim=-1
+        ).mean(dim=(0, 2))
+
+        other_key_mean = torch.stack(
+            other_keys, dim=-1
+        ).mean(dim=(0, 2))
+
+        results.append({
+            "layer": layer,
+            "previous_key": previous_key_mean,
+            "other_keys": other_key_mean,
+            "correct_value": correct_value.mean(dim=0),
+            "other_values": other_values.mean(dim=0),
+            "correct_value_share": correct_value_share.mean(dim=0),
+        })
+
+    return results

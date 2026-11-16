@@ -10,6 +10,10 @@ from src.utils import (
     extract_attention,
     plot_attention,
 )
+from src.utils import (
+    compute_behavior_metrics,
+    compute_attention_metrics,
+)
 
 
 def main(args):
@@ -34,58 +38,46 @@ def main(args):
     # Load trained transformer
     model = load_model(checkpoint_path, device, config)
 
-    # Generate fixed probe
-    tokens, targets = get_examples(config, seed=args.seed)
+    
+    # Generate new, reproducible examples
+    tokens, targets = get_examples(
+        config,
+        n_examples=1000,
+        seed=100000,
+    )
 
-    # Extract attention
-    predictions, attentions = extract_attention(
+    predictions, attentions, logits = extract_attention(
         model, tokens
     )
 
-    print("Tokens:", tokens.tolist())
-    print("Target:", targets.item())
-    print("Prediction:", predictions.item())
-    print("Correct:", predictions.item() == targets.item())
-
-    # Save results
-    output_dir = Path(args.output_dir) / f"L{args.num_layers}"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    torch.save(
-        {
-            "tokens": tokens,
-            "targets": targets,
-            "predictions": predictions,
-            "attentions": attentions,
-            "config": config,
-        },
-        output_dir / "attention.pt",
+    # Behavioral metrics
+    behavior = compute_behavior_metrics(
+        logits, tokens, targets
     )
 
-    plot_attention(
-        attentions,
-        tokens,
-        output_dir,
-        n_keys=args.n_keys,
+    print("\nBehavioral metrics")
+    print(f"Accuracy: {behavior['accuracy']:.2%}")
+    print(f"In-context rate: {behavior['in_context_rate']:.2%}")
+    print(f"Mean value margin: {behavior['mean_value_margin']:.4f}")
+
+    # Attention statistics
+    attention_results = compute_attention_metrics(
+        tokens, attentions
     )
 
+    for stats in attention_results:
+        print(f"\nLayer {stats['layer']}")
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+        n_heads = len(stats["previous_key"])
 
-    parser.add_argument("--num-layers", type=int, default=1)
-    parser.add_argument("--n-keys", type=int, default=32)
-    parser.add_argument("--n-values", type=int, default=32)
-    parser.add_argument("--n-pairs", type=int, default=4)
-    parser.add_argument("--d-model", type=int, default=64)
-    parser.add_argument("--num-heads", type=int, default=4)
-    parser.add_argument("--seed", type=int, default=1234)
+        for head in range(n_heads):
+            print(
+                f"Head {head} | "
+                f"Previous key: {stats['previous_key'][head]:.3f} | "
+                f"Other keys: {stats['other_keys'][head]:.3f} | "
+                f"Correct value: {stats['correct_value'][head]:.3f} | "
+                f"Other values: {stats['other_values'][head]:.3f} | "
+                f"Correct value share: "
+                f"{stats['correct_value_share'][head]:.2%}"
+            )
 
-    parser.add_argument("--checkpoint", type=str, default=None)
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="results/attention",
-    )
-
-    main(parser.parse_args())
